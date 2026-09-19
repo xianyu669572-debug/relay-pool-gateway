@@ -1,0 +1,19 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "relay-pool-gateway"
+version = "0.1.0"
+description = "Local-first, privacy-hardened OpenAI-compatible LLM gateway with priority failover and sensitive-data routing."
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+authors = [{ name = "Xianyu", email = "q66957200@outlook.com" }]
+dependencies = []
+
+[project.scripts]
+relay-pool-gateway = "relay_gateway.__main__:main"
+
+[tool.setuptools]
+packages = ["relay_gateway"]

@@ -1,0 +1,94 @@
+# relay-pool-gateway 示例配置
+# 铁律：任何 api_key 只写在环境变量里，配置里只写环境变量名（vault 踩坑：config 放 key 会被破坏/泄漏）
+
+[server]
+host = "127.0.0.1"
+port = 8400
+# 生成随机 key：python -c "import secrets; print(secrets.token_urlsafe(32))"
+# 本机免鉴权仅建议在可信环境使用；绑定非回环地址时必须填写
+api_keys = []
+request_max_bytes = 20971520
+state_file = "gateway-state.json"
+
+[routing]
+strategy = "priority"    # priority：按 priority 数值小者优先；同优先级内按 weight 轮询
+fallback_on = [408, 429, 500, 502, 503, 504]
+allow_degraded_fallback = true   # 全部渠道不健康时仍尽力尝试最优先渠道
+max_fallback_hops = 5            # 单请求最多尝试的渠道数（有界）
+
+[privacy]
+enabled = true
+mode = "safe_route"      # safe_route | redact | block | local
+vault_paths = ["C:\\Users\\<you>\\my-vault"]
+keywords = ["password", "api_key", "secret", "密码", "密钥", "令牌", "私密", "机密", "账号", "邮箱", "手机号", "身份证", "银行卡"]
+sticky_session = true
+session_ttl_s = 14400    # LiteLLM 同款默认：敏感会话钉在安全通道 4 小时
+audit_log = "audit.jsonl"
+scan_tool_args = true
+
+# 自定义敏感正则（可选）
+# custom_patterns = [
+#   { name = "PROJECT_TITAN", regex = "project\\s+titan", category = "codename", irreversible = false },
+# ]
+
+[[providers]]
+id = "relay-a"
+name = "中转站A"
+priority = 1
+base_url = "https://relay-a.example.com/v1"
+api_key_env = "RELAY_A_API_KEY"      # 从环境变量读取，绝不写明文
+models = ["deepseek-v4-flash", "deepseek-v4-pro"]
+weight = 1
+timeout_s = 60
+
+[providers.health]
+enabled = true
+url_suffix = "/models"
+interval_s = 60
+timeout_s = 8
+
+[providers.circuit]
+failure_threshold = 3
+cooldown_s = 60
+disable_on_401 = true
+
+[[providers]]
+id = "relay-b"
+name = "中转站B"
+priority = 2
+base_url = "https://relay-b.example.com/v1"
+api_key_env = "RELAY_B_API_KEY"
+models = ["deepseek-v4-flash"]
+weight = 2                     # 同优先级渠道按权重扩容（号池）
+timeout_s = 60
+
+[[providers]]
+id = "relay-c"
+name = "中转站C"
+priority = 3
+base_url = "https://relay-c.example.com/v1"
+api_key_env = "RELAY_C_API_KEY"
+models = ["deepseek-v4-flash"]
+timeout_s = 90                # 弱渠道给更长超时
+
+# 安全通道：官方 API（敏感请求专用，默认不参与普通优先级池）
+[[providers]]
+id = "deepseek-official"
+name = "DeepSeek 官方"
+priority = 0
+base_url = "https://api.deepseek.com/v1"
+api_key_env = "DEEPSEEK_API_KEY"
+models = ["deepseek-v4-flash", "deepseek-chat", "deepseek-reasoner"]
+safe = true
+
+# 本地安全通道（可选）：Ollama / vLLM / LM Studio 等 OpenAI 兼容端点
+# [[providers]]
+# id = "local-ollama"
+# name = "本地 Ollama"
+# priority = 0
+# base_url = "http://127.0.0.1:11434/v1"
+# api_key_env = ""
+# models = ["qwen2.5:7b"]
+# local = true
+# [providers.health]
+# enabled = false

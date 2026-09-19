@@ -1,0 +1,17 @@
+.env
+.env.*
+!.env.example
+config.local.toml
+config.toml
+!config.example.toml
+__pycache__/
+*.pyc
+audit.jsonl*
+gateway-state.json*
+*.key
+*.pem
+.pytest_cache/
+.coverage
+dist/
+build/
+*.egg-info/

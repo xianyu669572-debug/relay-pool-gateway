@@ -1,5 +1,89 @@
 # relay-pool-gateway
 
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![Python 3.11+](https://img.shields.io/badge/Python-3.11%2B-blue.svg)](https://www.python.org/)
+[![Version](https://img.shields.io/badge/version-0.1.0-green.svg)](https://github.com/xianyu669572-debug/relay-pool-gateway/releases)
+[![Tests](https://img.shields.io/badge/tests-73%20passed-brightgreen.svg)](#development)
+[![Dependencies](https://img.shields.io/badge/dependencies-zero-brightgreen.svg)](#quick-start)
+
+**Local-first, privacy-hardened OpenAI-compatible LLM gateway — provider pool + privacy routing.**
+
+Pool multiple relay / official / local providers behind one endpoint. If one provider fails or rate-limits, it automatically fails over to the next. If a request looks sensitive, it is *never* sent to an untrusted relay — it is routed to an official or local provider, redacted, or blocked.
+
+- **Protocol:** `POST /v1/chat/completions` (streaming SSE supported)
+- **Runtime:** Python 3.11+ standard library only — **zero pip dependencies**
+- **Tests:** 73 passed (`python3 -m unittest discover -s tests -v`)
+- **License:** [MIT](LICENSE)
+
+[中文介绍在下方 ↓](#中文介绍)
+
+---
+
+## Why this exists
+
+| Pain point | How this gateway solves it |
+|---|---|
+| One relay returns 429 / goes down | Priority + weighted round-robin pool, bounded failover to the next provider |
+| API keys leak from config files | Config only stores env-var *names*; keys live in environment variables |
+| Agent context contains passwords / paths / IDs and gets sent to an untrusted relay | Sensitive-data detection + `safe_route`: the whole session is pinned to a safe/local channel |
+| You still want cheap relays for non-sensitive traffic | `redact` mode: reversible placeholders for safe data, irreversible masking for secrets |
+
+This is **not a VPN**. It only does API aggregation and outbound privacy routing.
+
+## Quick Start
+
+```bash
+git clone https://github.com/xianyu669572-debug/relay-pool-gateway.git
+cd relay-pool-gateway
+
+# 1. Configure (never put real keys in the toml)
+cp config.example.toml config.local.toml
+# Edit [[providers]]: set base_url and api_key_env for each provider
+
+# 2. Inject keys via environment
+export RELAY_A_API_KEY="sk-..."
+export DEEPSEEK_API_KEY="sk-..."
+
+# 3. Run (listens on 127.0.0.1:8400 by default)
+python3 -m relay_gateway --config config.local.toml
+```
+
+```bash
+# 4. Call it — any OpenAI-compatible client works
+curl http://127.0.0.1:8400/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{"model":"deepseek-v4-flash","messages":[{"role":"user","content":"Hello"}],"stream":false}'
+```
+
+OpenAI Python SDK: set `base_url="http://127.0.0.1:8400/v1"`. Hermes / Codex / curl work the same way. Note: Codex `/v1/responses` is currently pass-through only; full adaptation is planned for v0.2.
+
+## Architecture
+
+```
+Client (Hermes / curl / OpenAI SDK)
+        │  http://127.0.0.1:8400/v1/chat/completions
+        ▼
+┌─────────────────────────────────────────┐
+│              server.py                  │
+│  Auth → Privacy decision → Routing      │
+│       → Upstream → Audit                │
+└─────────────────────────────────────────┘
+        │
+        ├─ privacy.py   sensitive detection / 4 modes / session stickiness
+        ├─ router.py    priority · weighted pool · failure classification
+        ├─ health.py    probing · 3-state circuit breaker · 429 cooldown
+        ├─ upstream.py  JSON / SSE, Retry-After parsing
+        └─ state.py     circuit state on disk (invalidated when config changes)
+```
+
+**Privacy modes:** `safe_route` (default, pin session to safe/local) · `redact` (placeholder + restore) · `local` (local models only) · `block` (reject with 400). Detection uses regex + context keywords + vault-path fingerprints + decode-then-rescan (base64/hex/URL). It is fail-closed by design — not 100%, and it only protects the outbound hop to upstream providers.
+
+See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the full request flow.
+
+---
+
+## 中文介绍
+
 本地优先、隐私硬隔离的 **OpenAI 兼容 LLM 网关**。
 
 把多家 **中转站 / 官方 API / 本地模型** 合成一个入口：按优先级调用，挂了自动换号（号池）；请求里一旦像敏感数据，就改走官方或本地，**默认不发给中转**。
@@ -13,7 +97,7 @@
 
 ---
 
-## 它解决什么问题
+### 它解决什么问题
 
 | 痛点 | 本网关怎么做 |
 |---|---|
@@ -26,7 +110,7 @@
 
 ---
 
-## 架构
+### 架构
 
 ```
 客户端 (Hermes / curl / OpenAI SDK)
@@ -58,20 +142,20 @@
 
 ---
 
-## 使用方法
+### 使用方法
 
-### 1. 环境
+#### 1. 环境
 
 - Python 3.11 或更高（WSL / Linux / macOS / Windows 均可）
 - 不需要 `pip install`（标准库即可）
 
 ```bash
-git clone https://github.com/<你的用户名>/relay-pool-gateway.git
+git clone https://github.com/xianyu669572-debug/relay-pool-gateway.git
 cd relay-pool-gateway
 python3 -m unittest discover -s tests -v
 ```
 
-### 2. 配置
+#### 2. 配置
 
 复制示例，**不要把真实 key 写进 toml**：
 
@@ -84,7 +168,7 @@ cp config.example.toml config.local.toml
 
 `[privacy] vault_paths` 改成你的知识库路径，用于「路径指纹」检测（避免把 vault 路径打到中转）。
 
-### 3. 注入密钥
+#### 3. 注入密钥
 
 ```bash
 export RELAY_A_API_KEY="sk-..."
@@ -98,7 +182,7 @@ $env:RELAY_A_API_KEY = "sk-..."
 $env:DEEPSEEK_API_KEY = "sk-..."
 ```
 
-### 4. 启动
+#### 4. 启动
 
 ```bash
 python3 -m relay_gateway --config config.local.toml
@@ -106,7 +190,7 @@ python3 -m relay_gateway --config config.local.toml
 
 默认监听 `127.0.0.1:8400`。
 
-### 5. 调用
+#### 5. 调用
 
 ```bash
 curl http://127.0.0.1:8400/v1/chat/completions \
@@ -120,7 +204,7 @@ Hermes：自定义 provider 的 `base_url` 指向上述地址，`api_mode` 用 c
 
 ---
 
-## 隐私四模式
+### 隐私四模式
 
 | 模式 | 行为 |
 |---|---|
@@ -134,7 +218,7 @@ Hermes：自定义 provider 的 `base_url` 指向上述地址，`api_mode` 用 c
 
 ---
 
-## 号池怎么配
+### 号池怎么配
 
 ```toml
 [[providers]]
@@ -155,7 +239,7 @@ api_key_env = "RELAY_B_API_KEY"
 
 ---
 
-## 文档索引
+### 文档索引
 
 | 文档 | 内容 |
 |---|---|
@@ -167,7 +251,7 @@ api_key_env = "RELAY_B_API_KEY"
 
 ---
 
-## 安全与合规（请先读）
+### 安全与合规（请先读）
 
 - 密钥只放环境变量或系统密钥库，禁止提交 `config.local.toml` / `.env`
 - 绑定 `0.0.0.0` 时必须配置 `[server] api_keys`
@@ -176,7 +260,7 @@ api_key_env = "RELAY_B_API_KEY"
 
 ---
 
-## 开发
+## Development
 
 ```bash
 python3 -m unittest discover -s tests -v
@@ -184,3 +268,5 @@ python3 scripts/scan_repo.py
 ```
 
 欢迎 Issue / PR。请勿在 issue 里粘贴真实 key 或用户数据。
+
+Issues and PRs are welcome. Please never paste real keys or user data in an issue.
